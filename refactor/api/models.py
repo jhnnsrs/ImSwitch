@@ -5,7 +5,7 @@ This module contains all data models used for request/response validation
 and task management.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
@@ -88,3 +88,46 @@ class StatusResponse(BaseModel):
 
     status: str
     version: str = "1.0.0"
+
+
+# State models
+class StateUpdateRequest(BaseModel):
+    """Request to update state."""
+
+    key: str = Field(..., description="State key (supports dot notation for nested keys)")
+    value: Any = Field(..., description="Value to set")
+    immediate: bool = Field(False, description="If True, broadcast immediately")
+
+
+class StateBatchUpdateRequest(BaseModel):
+    """Request to update multiple state values."""
+
+    updates: Dict[str, Any] = Field(..., description="Key-value pairs to update")
+    immediate: bool = Field(False, description="If True, broadcast immediately")
+
+
+class StateResponse(BaseModel):
+    """Response containing state."""
+
+    state: Dict[str, Any] = Field(default_factory=dict, description="Current state")
+    version: int = Field(0, description="State version number")
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+# Action models
+class ActionInfo(BaseModel):
+    """Information about a registered action."""
+
+    name: str = Field(..., description="Action name")
+    description: str = Field(..., description="Action description")
+    parameters_schema: Dict[str, Any] = Field(
+        default_factory=dict, description="JSON schema for parameters"
+    )
+    tags: List[str] = Field(default_factory=list, description="Action tags")
+
+
+class ActionExecuteRequest(BaseModel):
+    """Request to execute an action directly."""
+
+    action: str = Field(..., description="Action name")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Action parameters")

@@ -7,6 +7,9 @@ from fastapi.testclient import TestClient
 
 from refactor.api import create_app
 
+# Configure pytest-asyncio
+pytest_plugins = ("pytest_asyncio",)
+
 
 @pytest.fixture
 def client():

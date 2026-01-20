@@ -14,13 +14,25 @@ from .models import (
     ExperimentRequest,
     ProcessResult,
     StatusResponse,
+    StateUpdateRequest,
+    StateBatchUpdateRequest,
+    StateResponse,
+    ActionInfo,
+    ActionExecuteRequest,
 )
 from .managers import ConnectionManager, EngineManager
+from .state import StateProxy, StateUpdate, StateSnapshot
+from .registry import ActionRegistry, register, action_registry
+from . import actions  # Import to make actions available
 from .dependencies import (
     get_connection_manager,
     get_engine_manager,
+    get_state_proxy,
+    get_action_registry,
     ConnectionManagerDep,
     EngineManagerDep,
+    StateProxyDep,
+    ActionRegistryDep,
 )
 
 __all__ = [
@@ -34,12 +46,31 @@ __all__ = [
     "ExperimentRequest",
     "ProcessResult",
     "StatusResponse",
+    "StateUpdateRequest",
+    "StateBatchUpdateRequest",
+    "StateResponse",
+    "ActionInfo",
+    "ActionExecuteRequest",
     # Managers
     "ConnectionManager",
     "EngineManager",
+    # State
+    "StateProxy",
+    "StateUpdate",
+    "StateSnapshot",
+    # Registry
+    "ActionRegistry",
+    "register",
+    "action_registry",
+    # Actions module
+    "actions",
     # Dependencies
     "get_connection_manager",
     "get_engine_manager",
+    "get_state_proxy",
+    "get_action_registry",
     "ConnectionManagerDep",
     "EngineManagerDep",
+    "StateProxyDep",
+    "ActionRegistryDep",
 ]

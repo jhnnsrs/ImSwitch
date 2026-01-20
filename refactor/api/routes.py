@@ -17,8 +17,18 @@ from .models import (
     ExperimentRequest,
     ProcessResult,
     StatusResponse,
+    StateUpdateRequest,
+    StateBatchUpdateRequest,
+    StateResponse,
+    ActionInfo,
+    ActionExecuteRequest,
 )
-from .dependencies import ConnectionManagerDep, EngineManagerDep
+from .dependencies import (
+    ConnectionManagerDep,
+    EngineManagerDep,
+    StateProxyDep,
+    ActionRegistryDep,
+)
 
 
 # Create routers
@@ -27,6 +37,8 @@ schema_router = APIRouter(prefix="/schema", tags=["Schema"])
 tasks_router = APIRouter(prefix="/tasks", tags=["Tasks"])
 process_router = APIRouter(tags=["Processing"])
 ws_router = APIRouter(tags=["WebSocket"])
+state_router = APIRouter(prefix="/state", tags=["State"])
+actions_router = APIRouter(prefix="/actions", tags=["Actions"])
 
 
 # Status endpoints
@@ -221,3 +233,163 @@ async def process_experiment(
     )
 
     return result
+
+
+# State endpoints
+@state_router.get("", response_model=StateResponse)
+async def get_state(state_proxy: StateProxyDep, key: Optional[str] = None) -> StateResponse:
+    """
+    Get current state.
+
+    Args:
+        state_proxy: Injected StateProxy
+        key: Optional key to get specific value (supports dot notation)
+
+    Returns:
+        StateResponse with current state
+    """
+    snapshot = await state_proxy.get_snapshot()
+    if key:
+        value = await state_proxy.get(key)
+        return StateResponse(
+            state={key: value}, version=snapshot.version, timestamp=snapshot.timestamp
+        )
+    return StateResponse(
+        state=snapshot.state, version=snapshot.version, timestamp=snapshot.timestamp
+    )
+
+
+@state_router.put("", response_model=StateResponse)
+async def update_state(request: StateUpdateRequest, state_proxy: StateProxyDep) -> StateResponse:
+    """
+    Update a single state value.
+
+    Args:
+        request: State update request
+        state_proxy: Injected StateProxy
+
+    Returns:
+        Updated StateResponse
+    """
+    await state_proxy.set(request.key, request.value, immediate=request.immediate)
+    snapshot = await state_proxy.get_snapshot()
+    return StateResponse(
+        state=snapshot.state, version=snapshot.version, timestamp=snapshot.timestamp
+    )
+
+
+@state_router.patch("", response_model=StateResponse)
+async def batch_update_state(
+    request: StateBatchUpdateRequest, state_proxy: StateProxyDep
+) -> StateResponse:
+    """
+    Update multiple state values at once.
+
+    Args:
+        request: Batch update request
+        state_proxy: Injected StateProxy
+
+    Returns:
+        Updated StateResponse
+    """
+    await state_proxy.set_many(request.updates, immediate=request.immediate)
+    snapshot = await state_proxy.get_snapshot()
+    return StateResponse(
+        state=snapshot.state, version=snapshot.version, timestamp=snapshot.timestamp
+    )
+
+
+@state_router.delete("/{key:path}")
+async def delete_state(key: str, state_proxy: StateProxyDep, immediate: bool = False) -> dict:
+    """
+    Delete a state key.
+
+    Args:
+        key: State key to delete (supports dot notation via path)
+        state_proxy: Injected StateProxy
+        immediate: If True, broadcast immediately
+
+    Returns:
+        Success status
+    """
+    success = await state_proxy.delete(key, immediate=immediate)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Key '{key}' not found")
+    return {"success": True, "deleted_key": key}
+
+
+# Actions endpoints
+@actions_router.get("", response_model=List[ActionInfo])
+async def list_actions(registry: ActionRegistryDep, tag: Optional[str] = None) -> List[ActionInfo]:
+    """
+    List all registered actions.
+
+    Args:
+        registry: Injected ActionRegistry
+        tag: Optional tag to filter by
+
+    Returns:
+        List of ActionInfo
+    """
+    if tag:
+        actions = registry.get_actions_by_tag(tag)
+    else:
+        actions = registry.list_actions()
+
+    return [
+        ActionInfo(
+            name=info.name,
+            description=info.description,
+            parameters_schema=info.parameters_schema,
+            tags=list(info.tags),
+        )
+        for info in actions
+    ]
+
+
+@actions_router.get("/{action_name}", response_model=ActionInfo)
+async def get_action(action_name: str, registry: ActionRegistryDep) -> ActionInfo:
+    """
+    Get details about a specific action.
+
+    Args:
+        action_name: Name of the action
+        registry: Injected ActionRegistry
+
+    Returns:
+        ActionInfo for the action
+    """
+    info = registry.get(action_name)
+    if not info:
+        raise HTTPException(status_code=404, detail=f"Action '{action_name}' not found")
+    return ActionInfo(
+        name=info.name,
+        description=info.description,
+        parameters_schema=info.parameters_schema,
+        tags=list(info.tags),
+    )
+
+
+@actions_router.post("/{action_name}/execute")
+async def execute_action(
+    action_name: str, request: ActionExecuteRequest, registry: ActionRegistryDep
+) -> dict:
+    """
+    Execute an action directly (not as a scheduled task).
+
+    Args:
+        action_name: Name of the action
+        request: Execution request with parameters
+        registry: Injected ActionRegistry
+
+    Returns:
+        Action result
+    """
+    if not registry.has(action_name):
+        raise HTTPException(status_code=404, detail=f"Action '{action_name}' not found")
+
+    try:
+        result = await registry.execute(action_name, request.parameters)
+        return {"success": True, "action": action_name, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -15,6 +15,7 @@ from uuid import uuid4
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
+    from .registry import ActionRegistry
 
 from .models import Task, TaskStatus
 
@@ -53,9 +54,14 @@ class ConnectionManager:
 class EngineManager:
     """Manages microscope engine tasks and scheduling."""
 
-    def __init__(self, connection_manager: ConnectionManager):
+    def __init__(
+        self,
+        connection_manager: ConnectionManager,
+        action_registry: Optional[ActionRegistry] = None,
+    ):
         self.tasks: Dict[str, Task] = {}
         self.connection_manager = connection_manager
+        self.action_registry = action_registry
         self.is_running = False
         self._task_queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker_task: Optional[asyncio.Task[None]] = None
@@ -194,28 +200,13 @@ class EngineManager:
         """
         Perform the actual microscope action.
 
-        This is a placeholder - in a real implementation, this would interface
-        with actual microscope hardware/software.
+        Uses the action registry if available, otherwise falls back to
+        a simple default handler.
         """
-        # Simulate some processing time
-        await asyncio.sleep(0.5)
+        # Use action registry if available
+        if self.action_registry and self.action_registry.has(action):
+            return await self.action_registry.execute(action, parameters)
 
-        # Mock different microscope actions
-        if action == "capture_image":
-            return {
-                "image_id": str(uuid4()),
-                "exposure_time": parameters.get("exposure_time", 0.1),
-                "resolution": parameters.get("resolution", [1024, 1024]),
-            }
-        elif action == "move_stage":
-            return {
-                "position": parameters.get("position", [0, 0, 0]),
-                "success": True,
-            }
-        elif action == "adjust_focus":
-            return {
-                "focus_position": parameters.get("z_position", 0),
-                "success": True,
-            }
-        else:
-            return {"action": action, "parameters": parameters, "executed": True}
+        # Fallback: simulate some processing time
+        await asyncio.sleep(0.5)
+        return {"action": action, "parameters": parameters, "executed": True}

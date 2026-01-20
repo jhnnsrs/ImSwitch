@@ -2,8 +2,8 @@
 Simple API for experiment processing.
 """
 
-from typing import Dict, Any, Optional, List
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from typing import Dict, Any, Optional, List, Annotated
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from pydantic import BaseModel, Field
 import uvicorn
 import json
@@ -235,6 +235,22 @@ class ConnectionManager:
                 pass
 
 
+# Typed Dependencies for type-safe access to managers
+def get_connection_manager(request: Request) -> ConnectionManager:
+    """Get the ConnectionManager from app state with proper typing."""
+    return request.app.state.manager
+
+
+def get_engine_manager(request: Request) -> EngineManager:
+    """Get the EngineManager from app state with proper typing."""
+    return request.app.state.engine
+
+
+# Type aliases for dependency injection
+ConnectionManagerDep = Annotated[ConnectionManager, Depends(get_connection_manager)]
+EngineManagerDep = Annotated[EngineManager, Depends(get_engine_manager)]
+
+
 # Input/Output Models
 class ExperimentParameters(BaseModel):
     """Parameters for an experiment."""
@@ -326,18 +342,17 @@ def create_app() -> FastAPI:
         parameters: Dict[str, Any] = Field(default_factory=dict, description="Action parameters")
 
     @app.post("/tasks", response_model=Task)
-    async def create_task(task_request: TaskCreateRequest, request: Request) -> Task:
+    async def create_task(task_request: TaskCreateRequest, engine: EngineManagerDep) -> Task:
         """
         Schedule a new microscope task.
 
         Args:
             task_request: Task creation request
-            request: FastAPI request object
+            engine: Injected EngineManager
 
         Returns:
             Scheduled task with ID and status
         """
-        engine = request.app.state.engine
         task = Task(
             name=task_request.name, action=task_request.action, parameters=task_request.parameters
         )
@@ -346,34 +361,32 @@ def create_app() -> FastAPI:
 
     @app.get("/tasks", response_model=List[Task])
     async def list_tasks(
-        status: Optional[TaskStatus] = None, request: Request = None
+        engine: EngineManagerDep, status: Optional[TaskStatus] = None
     ) -> List[Task]:
         """
         List all tasks, optionally filtered by status.
 
         Args:
+            engine: Injected EngineManager
             status: Filter by task status
-            request: FastAPI request object
 
         Returns:
             List of tasks
         """
-        engine = request.app.state.engine
         return await engine.list_tasks(status)
 
     @app.get("/tasks/{task_id}", response_model=Task)
-    async def get_task(task_id: str, request: Request):
+    async def get_task(task_id: str, engine: EngineManagerDep) -> Task:
         """
         Get a specific task by ID.
 
         Args:
             task_id: Task ID
-            request: FastAPI request object
+            engine: Injected EngineManager
 
         Returns:
             Task details
         """
-        engine = request.app.state.engine
         task = await engine.get_task(task_id)
         if not task:
             from fastapi import HTTPException
@@ -382,18 +395,17 @@ def create_app() -> FastAPI:
         return task
 
     @app.delete("/tasks/{task_id}")
-    async def cancel_task(task_id: str, request: Request):
+    async def cancel_task(task_id: str, engine: EngineManagerDep):
         """
         Cancel a pending or running task.
 
         Args:
             task_id: Task ID
-            request: FastAPI request object
+            engine: Injected EngineManager
 
         Returns:
             Success status
         """
-        engine = request.app.state.engine
         success = await engine.cancel_task(task_id)
         if not success:
             from fastapi import HTTPException
@@ -435,19 +447,19 @@ def create_app() -> FastAPI:
             manager.disconnect(websocket)
 
     @app.post("/process", response_model=ProcessResult)
-    async def process_experiment(experiment: ExperimentRequest, request: Request) -> ProcessResult:
+    async def process_experiment(
+        experiment: ExperimentRequest, manager: ConnectionManagerDep
+    ) -> ProcessResult:
         """
         Process experiment data.
 
         Args:
             experiment: Experiment request with name and parameters
-            request: FastAPI request object
+            manager: Injected ConnectionManager
 
         Returns:
             ProcessResult with processed data
         """
-        manager = request.app.state.manager
-
         # Broadcast processing start
         await manager.broadcast(
             {
@@ -485,7 +497,7 @@ def create_app() -> FastAPI:
         )
 
         # Broadcast processing complete
-        await request.app.state.manager.broadcast(
+        await manager.broadcast(
             {
                 "type": "processing_complete",
                 "experiment_name": experiment.name,

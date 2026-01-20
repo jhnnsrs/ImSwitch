@@ -150,7 +150,7 @@ per-file-ignores = {"__init__.py" = ["F401"]}
 max-complexity = 10
 
 [tool.pytest.ini_options]
-testpaths = ["refactor"]
+testpaths = ["refactor/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

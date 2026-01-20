@@ -1,16 +1,12 @@
 """
-Simple API for experiment processing.
+Experiment Processing API Package.
 
-This module provides backward compatibility by re-exporting from the api package.
-For new code, import directly from the api package:
-
-    from refactor.api import create_app, Task, EngineManager
+This package provides a FastAPI-based API for processing experimental data
+with real-time WebSocket updates and task scheduling.
 """
 
-# Re-export everything from the api package for backward compatibility
-from .api import (
-    create_app,
-    # Models
+from .app import create_app
+from .models import (
     Task,
     TaskStatus,
     TaskCreateRequest,
@@ -18,21 +14,18 @@ from .api import (
     ExperimentRequest,
     ProcessResult,
     StatusResponse,
-    # Managers
-    ConnectionManager,
-    EngineManager,
-    # Dependencies
+)
+from .managers import ConnectionManager, EngineManager
+from .dependencies import (
     get_connection_manager,
     get_engine_manager,
     ConnectionManagerDep,
     EngineManagerDep,
 )
-from .api.main import main
 
 __all__ = [
     # App factory
     "create_app",
-    "main",
     # Models
     "Task",
     "TaskStatus",
@@ -50,7 +43,3 @@ __all__ = [
     "ConnectionManagerDep",
     "EngineManagerDep",
 ]
-
-
-if __name__ == "__main__":
-    main(reload=True)

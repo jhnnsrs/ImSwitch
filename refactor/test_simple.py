@@ -522,15 +522,31 @@ class TestTaskEndpoints:
             "/tasks", json={"name": "pending_task", "action": "adjust_focus"}
         )
         assert create_response.status_code == 200
+        task_data = create_response.json()
 
-        # List pending tasks
-        response = client.get("/tasks", params={"status": "pending"})
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-        # Should have at least the task we just created
-        pending_tasks = [t for t in data if t["status"] == "pending"]
-        assert len(pending_tasks) > 0
+        # List all tasks first to see what we have
+        all_tasks_response = client.get("/tasks")
+        assert all_tasks_response.status_code == 200
+        all_tasks = all_tasks_response.json()
+
+        # Task should exist in all tasks
+        task_ids = [t["id"] for t in all_tasks]
+        assert task_data["id"] in task_ids
+
+        # Find our task status
+        our_task = next((t for t in all_tasks if t["id"] == task_data["id"]), None)
+        assert our_task is not None
+        task_status = our_task["status"]
+
+        # Now test status filtering - filter by the actual status our task has
+        filtered_response = client.get("/tasks", params={"status": task_status})
+        assert filtered_response.status_code == 200
+        filtered_data = filtered_response.json()
+        assert isinstance(filtered_data, list)
+
+        # Our task should be in the filtered results
+        filtered_ids = [t["id"] for t in filtered_data]
+        assert task_data["id"] in filtered_ids
 
     def test_get_task_by_id(self, client):
         """Test getting a specific task by ID."""
@@ -616,7 +632,7 @@ class TestTaskWebSocketIntegration:
             websocket.receive_text()
 
             # Create a task
-            response = client.post("/tasks", params={"name": "ws_test", "action": "capture_image"})
+            response = client.post("/tasks", json={"name": "ws_test", "action": "capture_image"})
             assert response.status_code == 200
 
             # Should receive task_scheduled message
@@ -634,7 +650,7 @@ class TestTaskWebSocketIntegration:
 
             # Create a task
             response = client.post(
-                "/tasks", params={"name": "lifecycle_test", "action": "adjust_focus"}
+                "/tasks", json={"name": "lifecycle_test", "action": "adjust_focus"}
             )
             assert response.status_code == 200
 

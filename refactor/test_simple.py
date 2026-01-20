@@ -492,8 +492,8 @@ class TestTaskEndpoints:
             json={
                 "name": "capture_test",
                 "action": "capture_image",
-                "parameters": {"exposure_time": 0.1}
-            }
+                "parameters": {"exposure_time": 0.1},
+            },
         )
         assert response.status_code == 200
         data = response.json()
@@ -508,7 +508,7 @@ class TestTaskEndpoints:
         # Create a few tasks
         client.post("/tasks", json={"name": "task1", "action": "capture_image"})
         client.post("/tasks", json={"name": "task2", "action": "move_stage"})
-        
+
         response = client.get("/tasks")
         assert response.status_code == 200
         data = response.json()
@@ -519,11 +519,10 @@ class TestTaskEndpoints:
         """Test listing tasks filtered by status."""
         # Create a task
         create_response = client.post(
-            "/tasks",
-            json={"name": "pending_task", "action": "adjust_focus"}
+            "/tasks", json={"name": "pending_task", "action": "adjust_focus"}
         )
         assert create_response.status_code == 200
-        
+
         # List pending tasks
         response = client.get("/tasks", params={"status": "pending"})
         assert response.status_code == 200
@@ -537,12 +536,11 @@ class TestTaskEndpoints:
         """Test getting a specific task by ID."""
         # Create a task
         create_response = client.post(
-            "/tasks",
-            json={"name": "specific_task", "action": "capture_image"}
+            "/tasks", json={"name": "specific_task", "action": "capture_image"}
         )
         task_data = create_response.json()
         task_id = task_data["id"]
-        
+
         # Get the task
         response = client.get(f"/tasks/{task_id}")
         assert response.status_code == 200
@@ -558,12 +556,9 @@ class TestTaskEndpoints:
     def test_cancel_task(self, client):
         """Test cancelling a task."""
         # Create a task
-        create_response = client.post(
-            "/tasks",
-            json={"name": "cancel_me", "action": "move_stage"}
-        )
+        create_response = client.post("/tasks", json={"name": "cancel_me", "action": "move_stage"})
         task_id = create_response.json()["id"]
-        
+
         # Cancel the task
         response = client.delete(f"/tasks/{task_id}")
         assert response.status_code == 200
@@ -579,16 +574,17 @@ class TestTaskEndpoints:
             json={
                 "name": "execute_me",
                 "action": "capture_image",
-                "parameters": {"exposure_time": 0.1, "resolution": [512, 512]}
-            }
+                "parameters": {"exposure_time": 0.1, "resolution": [512, 512]},
+            },
         )
         assert create_response.status_code == 200
         task_id = create_response.json()["id"]
-        
+
         # Wait a bit for task to be processed
         import time
+
         time.sleep(1.5)
-        
+
         # Check task status
         response = client.get(f"/tasks/{task_id}")
         data = response.json()
@@ -602,8 +598,8 @@ class TestTaskEndpoints:
             json={
                 "name": "parameterized_task",
                 "action": "move_stage",
-                "parameters": {"position": [10, 20, 30]}
-            }
+                "parameters": {"position": [10, 20, 30]},
+            },
         )
         assert response.status_code == 200
         data = response.json()
@@ -618,14 +614,11 @@ class TestTaskWebSocketIntegration:
         with client.websocket_connect("/ws") as websocket:
             # Skip welcome message
             websocket.receive_text()
-            
+
             # Create a task
-            response = client.post(
-                "/tasks",
-                params={"name": "ws_test", "action": "capture_image"}
-            )
+            response = client.post("/tasks", params={"name": "ws_test", "action": "capture_image"})
             assert response.status_code == 200
-            
+
             # Should receive task_scheduled message
             data = websocket.receive_text()
             message = json.loads(data)
@@ -638,22 +631,22 @@ class TestTaskWebSocketIntegration:
         with client.websocket_connect("/ws") as websocket:
             # Skip welcome message
             websocket.receive_text()
-            
+
             # Create a task
             response = client.post(
-                "/tasks",
-                params={"name": "lifecycle_test", "action": "adjust_focus"}
+                "/tasks", params={"name": "lifecycle_test", "action": "adjust_focus"}
             )
             assert response.status_code == 200
-            
+
             # Receive task_scheduled
             msg1 = json.loads(websocket.receive_text())
             assert msg1["type"] == "task_scheduled"
-            
+
             # Wait for task execution notifications
             import time
+
             time.sleep(0.1)
-            
+
             # May receive task_started
             try:
                 msg2 = websocket.receive_text(timeout=1)

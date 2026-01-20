@@ -16,6 +16,7 @@ from uuid import uuid4
 
 class TaskStatus(str, Enum):
     """Status of a scheduled task."""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -25,6 +26,7 @@ class TaskStatus(str, Enum):
 
 class Task(BaseModel):
     """Represents a scheduled microscope task."""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str = Field(..., description="Name of the task")
     action: str = Field(..., description="Microscope action to perform")
@@ -67,16 +69,18 @@ class EngineManager:
         """Schedule a new task for execution."""
         self.tasks[task.id] = task
         await self._task_queue.put(task.id)
-        
+
         # Broadcast task scheduled
-        await self.connection_manager.broadcast({
-            "type": "task_scheduled",
-            "task_id": task.id,
-            "task_name": task.name,
-            "action": task.action,
-            "timestamp": datetime.now().isoformat()
-        })
-        
+        await self.connection_manager.broadcast(
+            {
+                "type": "task_scheduled",
+                "task_id": task.id,
+                "task_name": task.name,
+                "action": task.action,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
         return task
 
     async def cancel_task(self, task_id: str) -> bool:
@@ -86,13 +90,15 @@ class EngineManager:
             if task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
                 task.status = TaskStatus.CANCELLED
                 task.completed_at = datetime.now()
-                
-                await self.connection_manager.broadcast({
-                    "type": "task_cancelled",
-                    "task_id": task_id,
-                    "timestamp": datetime.now().isoformat()
-                })
-                
+
+                await self.connection_manager.broadcast(
+                    {
+                        "type": "task_cancelled",
+                        "task_id": task_id,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+
                 return True
         return False
 
@@ -112,10 +118,10 @@ class EngineManager:
             try:
                 task_id = await asyncio.wait_for(self._task_queue.get(), timeout=1.0)
                 task = self.tasks.get(task_id)
-                
+
                 if task and task.status == TaskStatus.PENDING:
                     await self._execute_task(task)
-                    
+
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
@@ -127,77 +133,75 @@ class EngineManager:
             # Update task status
             task.status = TaskStatus.RUNNING
             task.started_at = datetime.now()
-            
-            await self.connection_manager.broadcast({
-                "type": "task_started",
-                "task_id": task.id,
-                "task_name": task.name,
-                "timestamp": datetime.now().isoformat()
-            })
-            
+
+            await self.connection_manager.broadcast(
+                {
+                    "type": "task_started",
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
             # Simulate microscope action execution
             result = await self._perform_microscope_action(task.action, task.parameters)
-            
+
             # Task completed successfully
             task.status = TaskStatus.COMPLETED
             task.completed_at = datetime.now()
             task.result = result
-            
-            await self.connection_manager.broadcast({
-                "type": "task_completed",
-                "task_id": task.id,
-                "task_name": task.name,
-                "result": result,
-                "timestamp": datetime.now().isoformat()
-            })
-            
+
+            await self.connection_manager.broadcast(
+                {
+                    "type": "task_completed",
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "result": result,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
         except Exception as e:
             # Task failed
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.now()
             task.error = str(e)
-            
-            await self.connection_manager.broadcast({
-                "type": "task_failed",
-                "task_id": task.id,
-                "task_name": task.name,
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            })
 
-    async def _perform_microscope_action(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+            await self.connection_manager.broadcast(
+                {
+                    "type": "task_failed",
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
+    async def _perform_microscope_action(
+        self, action: str, parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Perform the actual microscope action.
-        
+
         This is a placeholder - in a real implementation, this would interface
         with actual microscope hardware/software.
         """
         # Simulate some processing time
         await asyncio.sleep(0.5)
-        
+
         # Mock different microscope actions
         if action == "capture_image":
             return {
                 "image_id": str(uuid4()),
                 "exposure_time": parameters.get("exposure_time", 0.1),
-                "resolution": parameters.get("resolution", [1024, 1024])
+                "resolution": parameters.get("resolution", [1024, 1024]),
             }
         elif action == "move_stage":
-            return {
-                "position": parameters.get("position", [0, 0, 0]),
-                "success": True
-            }
+            return {"position": parameters.get("position", [0, 0, 0]), "success": True}
         elif action == "adjust_focus":
-            return {
-                "focus_position": parameters.get("z_position", 0),
-                "success": True
-            }
+            return {"focus_position": parameters.get("z_position", 0), "success": True}
         else:
-            return {
-                "action": action,
-                "parameters": parameters,
-                "executed": True
-            }
+            return {"action": action, "parameters": parameters, "executed": True}
 
 
 # WebSocket Connection Manager
@@ -281,9 +285,9 @@ async def lifespan(app: FastAPI):
     app.state.manager = ConnectionManager()
     app.state.engine = EngineManager(app.state.manager)
     await app.state.engine.start()
-    
+
     yield
-    
+
     # Shutdown: cleanup
     await app.state.engine.stop()
     app.state.manager.active_connections.clear()
@@ -316,6 +320,7 @@ def create_app() -> FastAPI:
     # Engine/Task Management Endpoints
     class TaskCreateRequest(BaseModel):
         """Request model for creating a task."""
+
         name: str = Field(..., description="Task name")
         action: str = Field(..., description="Microscope action")
         parameters: Dict[str, Any] = Field(default_factory=dict, description="Action parameters")
@@ -324,35 +329,32 @@ def create_app() -> FastAPI:
     async def create_task(task_request: TaskCreateRequest, request: Request) -> Task:
         """
         Schedule a new microscope task.
-        
+
         Args:
             task_request: Task creation request
             request: FastAPI request object
-            
+
         Returns:
             Scheduled task with ID and status
         """
         engine = request.app.state.engine
         task = Task(
-            name=task_request.name,
-            action=task_request.action,
-            parameters=task_request.parameters
+            name=task_request.name, action=task_request.action, parameters=task_request.parameters
         )
         scheduled_task = await engine.schedule_task(task)
         return scheduled_task
 
     @app.get("/tasks", response_model=List[Task])
     async def list_tasks(
-        status: Optional[TaskStatus] = None,
-        request: Request = None
+        status: Optional[TaskStatus] = None, request: Request = None
     ) -> List[Task]:
         """
         List all tasks, optionally filtered by status.
-        
+
         Args:
             status: Filter by task status
             request: FastAPI request object
-            
+
         Returns:
             List of tasks
         """
@@ -363,11 +365,11 @@ def create_app() -> FastAPI:
     async def get_task(task_id: str, request: Request):
         """
         Get a specific task by ID.
-        
+
         Args:
             task_id: Task ID
             request: FastAPI request object
-            
+
         Returns:
             Task details
         """
@@ -375,6 +377,7 @@ def create_app() -> FastAPI:
         task = await engine.get_task(task_id)
         if not task:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404, detail="Task not found")
         return task
 
@@ -382,11 +385,11 @@ def create_app() -> FastAPI:
     async def cancel_task(task_id: str, request: Request):
         """
         Cancel a pending or running task.
-        
+
         Args:
             task_id: Task ID
             request: FastAPI request object
-            
+
         Returns:
             Success status
         """
@@ -394,11 +397,11 @@ def create_app() -> FastAPI:
         success = await engine.cancel_task(task_id)
         if not success:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=400, detail="Task cannot be cancelled")
         return {"success": True, "task_id": task_id}
 
     @app.websocket("/ws")
-
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         """

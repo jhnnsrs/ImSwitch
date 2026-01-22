@@ -1,8 +1,8 @@
 """
-Tests for ConnectionManager and EngineManager.
+Tests for ConnectionManager and FastAPIAgent.
 """
 
-from refactor.api import ConnectionManager, EngineManager
+from refactor.api import ConnectionManager, FastAPIAgent, DefinitionRegistry
 
 
 class TestConnectionManager:
@@ -22,24 +22,24 @@ class TestConnectionManager:
         assert hasattr(manager, "send_personal_message")
 
 
-class TestEngineManager:
-    """Tests for the EngineManager class."""
+class TestFastAPIAgent:
+    """Tests for the FastAPIAgent class."""
 
     def test_initialization(self):
-        """Test EngineManager initialization."""
-        conn_manager = ConnectionManager()
-        engine = EngineManager(conn_manager)
-        assert engine.tasks == {}
-        assert engine.connection_manager == conn_manager
-        assert engine.is_running is False
+        """Test FastAPIAgent initialization."""
+        registry = DefinitionRegistry()
+        agent = FastAPIAgent(
+            definition_registry=registry,
+        )
+        assert agent.managed_actors == {}
+        assert agent.managed_assignments == {}
+        assert agent.definition_registry == registry
 
     def test_has_required_methods(self):
-        """Test EngineManager has required methods."""
-        conn_manager = ConnectionManager()
-        engine = EngineManager(conn_manager)
-        assert hasattr(engine, "start")
-        assert hasattr(engine, "stop")
-        assert hasattr(engine, "schedule_task")
-        assert hasattr(engine, "cancel_task")
-        assert hasattr(engine, "get_task")
-        assert hasattr(engine, "list_tasks")
+        """Test FastAPIAgent has required methods."""
+        registry = DefinitionRegistry()
+        agent = FastAPIAgent(definition_registry=registry)
+        assert hasattr(agent, "assign")
+        assert hasattr(agent, "cancel")
+        assert hasattr(agent, "get_assignation")
+        assert hasattr(agent, "asend")

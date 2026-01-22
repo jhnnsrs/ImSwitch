@@ -96,51 +96,60 @@ class TestWebSocketEndpoint:
             assert msg2_complete["type"] == "processing_complete"
 
 
-class TestTaskWebSocketIntegration:
-    """Tests for WebSocket integration with task management."""
+class TestAssignationWebSocketIntegration:
+    """Tests for WebSocket integration with assignation management."""
 
-    def test_task_scheduled_websocket_notification(self, client):
-        """Test that WebSocket receives notification when task is scheduled."""
+    def test_assignation_created_websocket_notification(self, client):
+        """Test that WebSocket receives notification when assignation is created."""
         with client.websocket_connect("/ws") as websocket:
             # Skip welcome message
             websocket.receive_text()
 
-            # Create a task
-            response = client.post("/tasks", json={"name": "ws_test", "action": "capture_image"})
+            # Create an assignation
+            response = client.post(
+                "/actions/capture_image/assign",
+                json={"args": {"exposure_time": 0.1}},
+            )
             assert response.status_code == 200
+            assignation_id = response.json()["id"]
 
-            # Should receive task_scheduled message
+            # Should receive assignation_created message
             data = websocket.receive_text()
             message = json.loads(data)
-            assert message["type"] == "task_scheduled"
-            assert message["task_name"] == "ws_test"
-            assert "task_id" in message
+            assert message["type"] == "assignation_created"
+            assert message["assignation_id"] == assignation_id
+            assert message["action"] == "capture_image"
 
-    def test_task_lifecycle_websocket_notifications(self, client):
-        """Test WebSocket receives all task lifecycle notifications."""
+    def test_assignation_lifecycle_websocket_notifications(self, client):
+        """Test WebSocket receives assignation lifecycle notifications."""
         import time
 
         with client.websocket_connect("/ws") as websocket:
             # Skip welcome message
             websocket.receive_text()
 
-            # Create a task
+            # Create an assignation
             response = client.post(
-                "/tasks", json={"name": "lifecycle_test", "action": "adjust_focus"}
+                "/actions/adjust_focus/assign",
+                json={"args": {"z_position": 10.0}},
             )
             assert response.status_code == 200
 
-            # Receive task_scheduled
+            # Receive assignation_created
             msg1 = json.loads(websocket.receive_text())
-            assert msg1["type"] == "task_scheduled"
+            assert msg1["type"] == "assignation_created"
 
-            # Wait for task execution notifications
+            # Wait for execution notifications
             time.sleep(0.1)
 
-            # May receive task_started
+            # May receive assignation_done or assignation_error
             try:
                 msg2 = websocket.receive_text(timeout=1)
                 message = json.loads(msg2)
-                assert message["type"] in ["task_started", "task_completed"]
+                assert message["type"] in [
+                    "assignation_assigned",
+                    "assignation_done",
+                    "assignation_error",
+                ]
             except Exception:
-                pass  # Task might complete too quickly
+                pass  # Execution might complete too quickly

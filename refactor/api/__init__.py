@@ -1,15 +1,12 @@
 """
 Experiment Processing API Package.
 
-This package provides a FastAPI-based API for processing experimental data
-with real-time WebSocket updates and task scheduling.
+This package provides a FastAPI-based API for microscope control
+with real-time WebSocket updates and actor-based async execution using rekuest_next.
 """
 
 from .app import create_app
 from .models import (
-    Task,
-    TaskStatus,
-    TaskCreateRequest,
     ExperimentParameters,
     ExperimentRequest,
     ProcessResult,
@@ -17,31 +14,35 @@ from .models import (
     StateUpdateRequest,
     StateBatchUpdateRequest,
     StateResponse,
-    ActionInfo,
-    ActionExecuteRequest,
 )
-from .managers import ConnectionManager, EngineManager
+from .managers import ConnectionManager
 from .state import StateProxy, StateUpdate, StateSnapshot
-from .registry import ActionRegistry, register, action_registry
-from . import actions  # Import to make actions available
+from .actors import (
+    FastAPIAgent,
+    Actor,
+    AsyncFuncActor,
+    AsyncGenActor,
+    DefinitionRegistry,
+    StructureRegistry,
+    register,
+    messages,
+)
+from . import microscope_actions  # Import to make actions available
 from .dependencies import (
     get_connection_manager,
-    get_engine_manager,
     get_state_proxy,
-    get_action_registry,
+    get_definition_registry,
+    get_agent,
     ConnectionManagerDep,
-    EngineManagerDep,
     StateProxyDep,
-    ActionRegistryDep,
+    DefinitionRegistryDep,
+    AgentDep,
 )
 
 __all__ = [
     # App factory
     "create_app",
     # Models
-    "Task",
-    "TaskStatus",
-    "TaskCreateRequest",
     "ExperimentParameters",
     "ExperimentRequest",
     "ProcessResult",
@@ -49,28 +50,26 @@ __all__ = [
     "StateUpdateRequest",
     "StateBatchUpdateRequest",
     "StateResponse",
-    "ActionInfo",
-    "ActionExecuteRequest",
     # Managers
     "ConnectionManager",
-    "EngineManager",
     # State
     "StateProxy",
     "StateUpdate",
     "StateSnapshot",
-    # Registry
-    "ActionRegistry",
+    # Actor system (rekuest_next re-exports)
+    "FastAPIAgent",
+    "Actor",
+    "AsyncFuncActor",
+    "AsyncGenActor",
+    "DefinitionRegistry",
+    "StructureRegistry",
     "register",
-    "action_registry",
-    # Actions module
-    "actions",
-    # Dependencies
-    "get_connection_manager",
-    "get_engine_manager",
+    "messages",
     "get_state_proxy",
-    "get_action_registry",
+    "get_definition_registry",
+    "get_agent",
     "ConnectionManagerDep",
-    "EngineManagerDep",
     "StateProxyDep",
-    "ActionRegistryDep",
+    "DefinitionRegistryDep",
+    "AgentDep",
 ]

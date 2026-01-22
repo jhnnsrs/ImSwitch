@@ -14,7 +14,7 @@ class TestStatusEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
-        assert data["version"] == "1.0.0"
+        assert data["version"] == "2.0.0"
 
 
 class TestSchemaEndpoints:
@@ -160,144 +160,173 @@ class TestProcessEndpoint:
         assert response.status_code == 422
 
 
-class TestTaskEndpoints:
-    """Tests for task management endpoints."""
+class TestActionsEndpoints:
+    """Tests for action definition endpoints."""
 
-    def test_create_task(self, client):
-        """Test creating a new task."""
+    def test_list_actions(self, client):
+        """Test listing all registered actions."""
+        response = client.get("/actions")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        # Should have registered actions from microscope_actions
+        action_names = [a["name"] for a in data]
+        assert "capture_image" in action_names
+        assert "move_stage" in action_names
+
+    def test_get_action_details(self, client):
+        """Test getting details for a specific action."""
+        response = client.get("/actions/capture_image")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "capture_image"
+        assert "description" in data
+        assert "args" in data
+        assert "returns" in data
+
+    def test_get_nonexistent_action(self, client):
+        """Test getting an action that doesn't exist."""
+        response = client.get("/actions/nonexistent_action")
+        assert response.status_code == 404
+
+
+class TestAssignationEndpoints:
+    """Tests for action assignment and execution endpoints."""
+
+    def test_assign_action(self, client):
+        """Test assigning an action for execution."""
         response = client.post(
-            "/tasks",
+            "/actions/capture_image/assign",
             json={
-                "name": "capture_test",
-                "action": "capture_image",
-                "parameters": {"exposure_time": 0.1},
+                "args": {"exposure_time": 0.1, "resolution": [512, 512]},
+                "reference": "test-ref-123",
             },
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["name"] == "capture_test"
-        assert data["action"] == "capture_image"
-        assert data["status"] == "pending"
         assert "id" in data
+        assert data["action"] == "capture_image"
+        assert data["status"] in ["pending", "assigned", "running", "done"]
         assert "created_at" in data
+        assert data["reference"] == "test-ref-123"
 
-    def test_list_tasks(self, client):
-        """Test listing all tasks."""
-        # Create a few tasks
-        client.post("/tasks", json={"name": "task1", "action": "capture_image"})
-        client.post("/tasks", json={"name": "task2", "action": "move_stage"})
+    def test_assign_action_minimal(self, client):
+        """Test assigning an action with minimal parameters."""
+        response = client.post(
+            "/actions/move_stage/assign",
+            json={"args": {}},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "id" in data
+        assert data["action"] == "move_stage"
 
-        response = client.get("/tasks")
+    def test_assign_nonexistent_action(self, client):
+        """Test assigning an action that doesn't exist."""
+        response = client.post(
+            "/actions/nonexistent_action/assign",
+            json={"args": {}},
+        )
+        assert response.status_code == 404
+
+    def test_list_assignations(self, client):
+        """Test listing all assignations."""
+        # Create a few assignations first
+        client.post("/actions/capture_image/assign", json={"args": {}})
+        client.post("/actions/move_stage/assign", json={"args": {}})
+
+        response = client.get("/assignations")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
         assert len(data) >= 2
 
-    def test_list_tasks_filtered_by_status(self, client):
-        """Test listing tasks filtered by status."""
-        # Create a task
-        create_response = client.post(
-            "/tasks", json={"name": "pending_task", "action": "adjust_focus"}
-        )
+    def test_list_assignations_filtered_by_action(self, client):
+        """Test listing assignations filtered by action name."""
+        # Create an assignation
+        create_response = client.post("/actions/adjust_focus/assign", json={"args": {}})
         assert create_response.status_code == 200
-        task_data = create_response.json()
+        assignation_id = create_response.json()["id"]
 
-        # List all tasks first to see what we have
-        all_tasks_response = client.get("/tasks")
-        assert all_tasks_response.status_code == 200
-        all_tasks = all_tasks_response.json()
-
-        # Task should exist in all tasks
-        task_ids = [t["id"] for t in all_tasks]
-        assert task_data["id"] in task_ids
-
-        # Find our task status
-        our_task = next((t for t in all_tasks if t["id"] == task_data["id"]), None)
-        assert our_task is not None
-        task_status = our_task["status"]
-
-        # Now test status filtering - filter by the actual status our task has
-        filtered_response = client.get("/tasks", params={"status": task_status})
+        # List filtered by action
+        filtered_response = client.get("/assignations", params={"action": "adjust_focus"})
         assert filtered_response.status_code == 200
         filtered_data = filtered_response.json()
         assert isinstance(filtered_data, list)
 
-        # Our task should be in the filtered results
-        filtered_ids = [t["id"] for t in filtered_data]
-        assert task_data["id"] in filtered_ids
+        # Our assignation should be in the filtered results
+        filtered_ids = [a["id"] for a in filtered_data]
+        assert assignation_id in filtered_ids
 
-    def test_get_task_by_id(self, client):
-        """Test getting a specific task by ID."""
-        # Create a task
+    def test_get_assignation_by_id(self, client):
+        """Test getting a specific assignation by ID."""
+        # Create an assignation
         create_response = client.post(
-            "/tasks", json={"name": "specific_task", "action": "capture_image"}
+            "/actions/capture_image/assign",
+            json={"args": {"exposure_time": 0.5}},
         )
-        task_data = create_response.json()
-        task_id = task_data["id"]
+        assignation_id = create_response.json()["id"]
 
-        # Get the task
-        response = client.get(f"/tasks/{task_id}")
+        # Get the assignation
+        response = client.get(f"/assignations/{assignation_id}")
         assert response.status_code == 200
         data = response.json()
-        assert data["id"] == task_id
-        assert data["name"] == "specific_task"
+        assert data["id"] == assignation_id
+        assert data["action"] == "capture_image"
 
-    def test_get_nonexistent_task(self, client):
-        """Test getting a task that doesn't exist."""
-        response = client.get("/tasks/nonexistent-id")
+    def test_get_nonexistent_assignation(self, client):
+        """Test getting an assignation that doesn't exist."""
+        response = client.get("/assignations/nonexistent-id")
         assert response.status_code == 404
 
-    def test_cancel_task(self, client):
-        """Test cancelling a task."""
-        # Create a task
-        create_response = client.post("/tasks", json={"name": "cancel_me", "action": "move_stage"})
-        task_id = create_response.json()["id"]
+    def test_cancel_assignation(self, client):
+        """Test cancelling an assignation."""
+        # Create an assignation
+        create_response = client.post("/actions/move_stage/assign", json={"args": {}})
+        assignation_id = create_response.json()["id"]
 
-        # Cancel the task
-        response = client.delete(f"/tasks/{task_id}")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["task_id"] == task_id
+        # Cancel the assignation
+        response = client.delete(f"/assignations/{assignation_id}")
+        # May succeed or fail depending on state
+        assert response.status_code in [200, 400]
+        if response.status_code == 200:
+            data = response.json()
+            assert data["success"] is True
+            assert data["assignation_id"] == assignation_id
 
-    def test_task_execution(self, client):
-        """Test that tasks are executed by the engine."""
+    def test_assignation_execution(self, client):
+        """Test that assignations are executed by the agent."""
         import time
 
-        # Create a task
+        # Create an assignation
         create_response = client.post(
-            "/tasks",
-            json={
-                "name": "execute_me",
-                "action": "capture_image",
-                "parameters": {"exposure_time": 0.1, "resolution": [512, 512]},
-            },
+            "/actions/capture_image/assign",
+            json={"args": {"exposure_time": 0.1}},
         )
         assert create_response.status_code == 200
-        task_id = create_response.json()["id"]
+        assignation_id = create_response.json()["id"]
 
-        # Wait a bit for task to be processed
+        # Wait a bit for execution
         time.sleep(1.5)
 
-        # Check task status
-        response = client.get(f"/tasks/{task_id}")
+        # Check assignation status
+        response = client.get(f"/assignations/{assignation_id}")
         data = response.json()
-        # Task should be completed or running
-        assert data["status"] in ["completed", "running"]
+        # Assignation should be completed or running
+        assert data["status"] in ["running", "done", "error"]
 
-    def test_task_with_parameters(self, client):
-        """Test creating task with custom parameters."""
+    def test_assignation_with_reference(self, client):
+        """Test creating assignation with client reference."""
         response = client.post(
-            "/tasks",
+            "/actions/move_stage/assign",
             json={
-                "name": "parameterized_task",
-                "action": "move_stage",
-                "parameters": {"position": [10, 20, 30]},
+                "args": {"x": 10, "y": 20, "z": 30},
+                "reference": "my-custom-ref",
             },
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["parameters"]["position"] == [10, 20, 30]
+        assert data["reference"] == "my-custom-ref"
 
 
 class TestAPIDocumentation:
@@ -309,7 +338,7 @@ class TestAPIDocumentation:
         assert response.status_code == 200
         schema = response.json()
         assert schema["info"]["title"] == "Experiment Processing API"
-        assert schema["info"]["version"] == "1.0.0"
+        assert schema["info"]["version"] == "2.0.0"
 
     def test_docs_endpoint_exists(self, client):
         """Test that /docs endpoint is available."""

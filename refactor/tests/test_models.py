@@ -10,9 +10,8 @@ from refactor.api import (
     ExperimentRequest,
     ProcessResult,
     StatusResponse,
-    Task,
-    TaskStatus,
 )
+from refactor.api.actors.fastapi_agent import AssignationState
 
 
 class TestStatusResponse:
@@ -100,30 +99,32 @@ class TestProcessResult:
         assert result.processed_data["exposure_time"] == 0.2
 
 
-class TestTask:
-    """Tests for Task model."""
+class TestAssignationState:
+    """Tests for AssignationState model."""
 
-    def test_task_creation(self):
-        """Test creating a task."""
-        task = Task(name="test_task", action="capture_image")
-        assert task.name == "test_task"
-        assert task.action == "capture_image"
-        assert task.status == TaskStatus.PENDING
-        assert task.id is not None
+    def test_assignation_state_creation(self):
+        """Test creating an assignation state."""
+        state = AssignationState(id="test-id", interface="capture_image")
+        assert state.interface == "capture_image"
+        assert state.status == "pending"
+        assert state.id == "test-id"
 
-    def test_task_with_parameters(self):
-        """Test task with parameters."""
-        task = Task(
-            name="parameterized",
-            action="move_stage",
-            parameters={"x": 10, "y": 20},
+    def test_assignation_state_with_args(self):
+        """Test assignation state with arguments."""
+        state = AssignationState(
+            id="test-id",
+            interface="move_stage",
+            args={"x": 10, "y": 20},
         )
-        assert task.parameters == {"x": 10, "y": 20}
+        assert state.args == {"x": 10, "y": 20}
 
-    def test_task_status_enum(self):
-        """Test TaskStatus enum values."""
-        assert TaskStatus.PENDING.value == "pending"
-        assert TaskStatus.RUNNING.value == "running"
-        assert TaskStatus.COMPLETED.value == "completed"
-        assert TaskStatus.FAILED.value == "failed"
-        assert TaskStatus.CANCELLED.value == "cancelled"
+    def test_assignation_state_status_values(self):
+        """Test AssignationState status values."""
+        state = AssignationState(id="test-id", interface="test", status="pending")
+        assert state.status == "pending"
+
+        state.status = "running"
+        assert state.status == "running"
+
+        state.status = "done"
+        assert state.status == "done"

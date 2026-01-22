@@ -1,6 +1,7 @@
-# Microscope Control API
+# Microscope Control API v2.0
 
-A modern, async-first API for microscope control with real-time state synchronization and a declarative action system.
+A modern, async-first API for microscope control with an actor-based execution system, 
+real-time state synchronization, and WebSocket-based event delivery.
 
 ## Architecture Overview
 
@@ -8,24 +9,34 @@ A modern, async-first API for microscope control with real-time state synchroniz
 ┌─────────────────────────────────────────────────────────────────┐
 │                        React Frontend                           │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ useAction()  │  │  useState()  │  │ useWebSocket │          │
-│  │ "capture"    │  │  "stage.pos" │  │  (updates)   │          │
+│  │useAssignation│  │  useState()  │  │ useWebSocket │          │
+│  │   hooks      │  │  "stage.pos" │  │  (events)    │          │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
 └─────────┼─────────────────┼─────────────────┼───────────────────┘
           │                 │                 │
           ▼                 ▼                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      FastAPI Backend                            │
+│                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ ActionRegistry│  │  StateProxy  │  │ WebSocket    │          │
-│  │ @register    │  │  (buffered)  │  │ Broadcasts   │          │
+│  │DefinitionReg │  │  StateProxy  │  │   Agent      │          │
+│  │  @register   │  │  (buffered)  │  │  (actors)    │          │
 │  └──────────────┘  └──────────────┘  └──────────────┘          │
-│                           │                                     │
-│                    ┌──────┴──────┐                              │
-│                    │EngineManager│                              │
-│                    │ Task Queue  │                              │
-│                    └──────┬──────┘                              │
-└───────────────────────────┼─────────────────────────────────────┘
+│                                              │                  │
+│  ┌──────────────────────────────────────────┐│                  │
+│  │              Actor System                ││                  │
+│  │  ┌────────┐  ┌────────┐  ┌────────┐     ││                  │
+│  │  │ Actor1 │  │ Actor2 │  │ Actor3 │     ││                  │
+│  │  └────────┘  └────────┘  └────────┘     ││                  │
+│  └──────────────────────────────────────────┘│                  │
+│                                              │                  │
+│  ┌───────────────────────────────────────────┘                  │
+│  │        WebSocket Broadcasts                                  │
+│  │  • assignation_created  • assignation_done                   │
+│  │  • assignation_yield    • assignation_error                  │
+│  │  • state_update         • assignation_progress               │
+│  └──────────────────────────────────────────────────────────────│
+└─────────────────────────────────────────────────────────────────┘
                             │
                             ▼
                    ┌─────────────────┐
@@ -36,37 +47,104 @@ A modern, async-first API for microscope control with real-time state synchroniz
 
 ## Core Concepts
 
-### 1. Action Registry
+### 1. Actor-Based Execution (Inspired by rekuest-next)
 
-Actions are the atomic operations the microscope can perform. They're registered with a simple decorator:
+Actions are defined as regular Python functions and automatically wrapped in actors
+for async execution. When you "assign" an action, it returns immediately with an 
+assignation ID. Results are delivered via WebSocket.
 
 ```python
-# api/actions.py
-from refactor.api import register
+# api/microscope_actions.py
+from refactor.api.actors import register
 
 @register(
     name="capture_image",
     description="Capture an image from the camera",
-    parameters_schema={
-        "type": "object",
-        "properties": {
-            "exposure_time": {"type": "number"},
-            "channel": {"type": "string"},
-        },
-    },
-    tags=["imaging", "camera"],
+    collections=["imaging", "camera"],
 )
-async def capture_image(params):
+async def capture_image(
+    exposure_time: float = 0.1,
+    resolution: list[int] | None = None,
+    channel: str = "default",
+) -> dict:
+    """Capture an image from the microscope camera."""
     # Interact with actual hardware here
-    image = await camera.capture(
-        exposure=params.get("exposure_time", 0.1)
-    )
-    return {"image_id": image.id, "shape": image.shape}
+    image = await camera.capture(exposure=exposure_time)
+    return {"image_id": str(image.id), "shape": image.shape}
 ```
 
-### 2. State Proxy (Buffered State)
+**Key Features:**
+- Function signature is automatically introspected to generate API schema
+- Supports sync/async functions
+- Supports generators for streaming results (time-lapse, z-stacks)
+- Actions run in their own actors for isolation
 
-The `StateProxy` provides a shared state that:
+### 2. Assignation Lifecycle
+
+```
+POST /actions/capture_image/assign
+{
+    "args": {"exposure_time": 0.1, "resolution": [1024, 1024]},
+    "reference": "my-capture-001"  // Optional client reference
+}
+
+→ Response (immediate):
+{
+    "id": "assign-abc123",
+    "action": "capture_image", 
+    "status": "PENDING",
+    "args": {"exposure_time": 0.1, ...},
+    "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+**Status Flow:**
+```
+PENDING → ASSIGNED → RUNNING → DONE
+                           └→ ERROR
+                           └→ CANCELLED
+```
+
+**WebSocket Events:**
+```json
+{"type": "assignation_created", "assignation_id": "abc123", "action": "capture_image"}
+{"type": "assignation_assigned", "assignation_id": "abc123"}
+{"type": "assignation_progress", "assignation_id": "abc123", "progress": 50}
+{"type": "assignation_done", "assignation_id": "abc123", "returns": {"image_id": "..."}}
+```
+
+### 3. Generator Actions (Streaming Results)
+
+For actions that produce multiple results (like time-lapse or z-stacks):
+
+```python
+@register(
+    name="time_lapse",
+    description="Capture a time-lapse sequence",
+    collections=["imaging", "timelapse"],
+)
+async def time_lapse(
+    num_frames: int = 10,
+    interval: float = 1.0,
+    exposure_time: float = 0.1,
+):
+    """Stream images over time."""
+    for frame in range(num_frames):
+        await asyncio.sleep(interval)
+        image = await camera.capture(exposure=exposure_time)
+        yield {
+            "frame": frame,
+            "image_id": str(uuid4()),
+            "timestamp": datetime.now().isoformat(),
+        }
+```
+
+Each `yield` sends an `assignation_yield` WebSocket event, allowing the frontend
+to display progress in real-time.
+
+### 4. State Proxy (Buffered State)
+
+The `StateProxy` provides shared state that:
 - Supports nested keys via dot notation (`stage.position.x`)
 - Buffers updates and broadcasts them periodically via WebSocket
 - Provides atomic snapshots with versioning
@@ -83,98 +161,195 @@ await state_proxy.set_many({
 })
 ```
 
-### 3. Engine Manager (Task Queue)
+---
 
-Long-running or sequential operations are scheduled as tasks:
+## API Endpoints
 
-```python
-POST /tasks
-{
-    "name": "Z-Stack Acquisition",
-    "action": "acquire_z_stack",
-    "parameters": {"z_start": 0, "z_end": 100, "z_step": 1}
-}
-```
+### Actions
 
-Tasks emit WebSocket events: `task_scheduled`, `task_started`, `task_completed`, `task_failed`.
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/actions` | GET | List all registered actions |
+| `/actions/{name}` | GET | Get action definition |
+| `/actions/{name}/assign` | POST | Assign (execute) an action |
+
+### Assignations
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/assignations` | GET | List assignations (with filters) |
+| `/assignations/{id}` | GET | Get assignation status/result |
+| `/assignations/{id}` | DELETE | Cancel an assignation |
+
+### State
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/state` | GET | Get current state snapshot |
+| `/state` | PUT | Update single state value |
+| `/state` | PATCH | Batch update state values |
+| `/state/{key}` | DELETE | Delete state key |
+
+### WebSocket
+
+Connect to `/ws` for real-time events.
 
 ---
 
 ## React Frontend Integration
 
-### useAction Hook
+### useAssignAction Hook
 
-A React hook that wraps action execution with loading states and error handling:
+A React hook for executing actions with async tracking:
 
 ```tsx
-// hooks/useAction.ts
-import { useState, useCallback } from 'react';
+// hooks/useAssignAction.ts
+import { useState, useCallback, useEffect } from 'react';
 
-interface ActionResult<T> {
-  execute: (params?: Record<string, any>) => Promise<T>;
-  data: T | null;
-  loading: boolean;
-  error: Error | null;
+interface Assignation {
+  id: string;
+  action: string;
+  status: 'PENDING' | 'ASSIGNED' | 'RUNNING' | 'DONE' | 'ERROR' | 'CANCELLED';
+  args: Record<string, any>;
+  returns?: Record<string, any>;
+  yields: Array<Record<string, any>>;
+  error?: string;
+  progress?: number;
 }
 
-export function useAction<T = any>(actionName: string): ActionResult<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+interface UseAssignActionResult {
+  assign: (args?: Record<string, any>) => Promise<Assignation>;
+  assignation: Assignation | null;
+  isRunning: boolean;
+  error: string | null;
+  yields: Array<Record<string, any>>;
+}
 
-  const execute = useCallback(async (params = {}) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`/actions/${actionName}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: actionName, parameters: params }),
-      });
-      const result = await response.json();
-      setData(result.result);
-      return result.result;
-    } catch (err) {
-      setError(err as Error);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
+export function useAssignAction(actionName: string): UseAssignActionResult {
+  const [assignation, setAssignation] = useState<Assignation | null>(null);
+  const [yields, setYields] = useState<Array<Record<string, any>>>([]);
+  const ws = useWebSocket(); // Your WebSocket context
+
+  const assign = useCallback(async (args = {}) => {
+    setYields([]);
+    const response = await fetch(`/actions/${actionName}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args }),
+    });
+    const data = await response.json();
+    setAssignation(data);
+    return data;
   }, [actionName]);
 
-  return { execute, data, loading, error };
+  // Listen for WebSocket updates
+  useEffect(() => {
+    if (!assignation) return;
+
+    const handler = (event: MessageEvent) => {
+      const msg = JSON.parse(event.data);
+      if (msg.assignation_id !== assignation.id) return;
+
+      switch (msg.type) {
+        case 'assignation_assigned':
+        case 'assignation_progress':
+          setAssignation(prev => prev ? { ...prev, ...msg } : prev);
+          break;
+        case 'assignation_yield':
+          setYields(prev => [...prev, msg.value]);
+          break;
+        case 'assignation_done':
+          setAssignation(prev => prev ? { 
+            ...prev, 
+            status: 'DONE', 
+            returns: msg.returns 
+          } : prev);
+          break;
+        case 'assignation_error':
+          setAssignation(prev => prev ? { 
+            ...prev, 
+            status: 'ERROR', 
+            error: msg.error 
+          } : prev);
+          break;
+      }
+    };
+
+    ws.addEventListener('message', handler);
+    return () => ws.removeEventListener('message', handler);
+  }, [assignation?.id, ws]);
+
+  return {
+    assign,
+    assignation,
+    isRunning: assignation?.status === 'RUNNING' || assignation?.status === 'ASSIGNED',
+    error: assignation?.error ?? null,
+    yields,
+  };
 }
 ```
 
-### Usage in Components
+### Usage Example: Capture Button
 
 ```tsx
-// components/CaptureButton.tsx
 function CaptureButton() {
-  const { execute, loading } = useAction('capture_image');
+  const { assign, isRunning, assignation } = useAssignAction('capture_image');
+
+  const handleCapture = async () => {
+    await assign({ exposure_time: 0.1 });
+  };
 
   return (
-    <button 
-      onClick={() => execute({ exposure_time: 0.1 })}
-      disabled={loading}
-    >
-      {loading ? 'Capturing...' : 'Capture Image'}
-    </button>
+    <div>
+      <button onClick={handleCapture} disabled={isRunning}>
+        {isRunning ? 'Capturing...' : 'Capture Image'}
+      </button>
+      {assignation?.status === 'DONE' && (
+        <p>Captured: {assignation.returns?.image_id}</p>
+      )}
+    </div>
+  );
+}
+```
+
+### Usage Example: Time-Lapse with Progress
+
+```tsx
+function TimeLapseCapture() {
+  const { assign, isRunning, yields, assignation } = useAssignAction('time_lapse');
+
+  const startTimeLapse = async () => {
+    await assign({ num_frames: 10, interval: 1.0 });
+  };
+
+  return (
+    <div>
+      <button onClick={startTimeLapse} disabled={isRunning}>
+        {isRunning ? `Frame ${yields.length}/10...` : 'Start Time-Lapse'}
+      </button>
+      
+      {isRunning && (
+        <progress value={yields.length} max={10} />
+      )}
+      
+      <div className="thumbnails">
+        {yields.map((frame, i) => (
+          <img key={i} src={`/images/${frame.image_id}`} alt={`Frame ${i}`} />
+        ))}
+      </div>
+    </div>
   );
 }
 ```
 
 ### useMicroscopeState Hook
 
-Subscribe to real-time state updates via WebSocket:
+Subscribe to real-time state updates:
 
 ```tsx
-// hooks/useMicroscopeState.ts
-import { useState, useEffect } from 'react';
-
 export function useMicroscopeState<T>(key: string, defaultValue: T): T {
   const [value, setValue] = useState<T>(defaultValue);
-  const ws = useWebSocket(); // Your WebSocket context
+  const ws = useWebSocket();
 
   useEffect(() => {
     // Initial fetch
@@ -183,152 +358,80 @@ export function useMicroscopeState<T>(key: string, defaultValue: T): T {
       .then(data => setValue(data.state[key] ?? defaultValue));
 
     // Subscribe to updates
-    const handler = (message: any) => {
-      if (message.type === 'state_update' && message.keys.includes(key)) {
-        setValue(message.updates[key]);
+    const handler = (event: MessageEvent) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'state_update' && key in msg.updates) {
+        setValue(msg.updates[key]);
       }
     };
-    ws.on('message', handler);
-    return () => ws.off('message', handler);
-  }, [key]);
+    ws.addEventListener('message', handler);
+    return () => ws.removeEventListener('message', handler);
+  }, [key, ws]);
 
   return value;
 }
-```
 
-### Usage in Components
-
-```tsx
-// components/StagePosition.tsx
+// Usage
 function StagePosition() {
   const position = useMicroscopeState('stage.position', [0, 0, 0]);
-  const { execute } = useAction('move_stage');
-
-  return (
-    <div>
-      <p>X: {position[0]} Y: {position[1]} Z: {position[2]}</p>
-      <button onClick={() => execute({ position: [0, 0, 0] })}>
-        Go Home
-      </button>
-    </div>
-  );
-}
-```
-
-### useTask Hook
-
-For long-running operations with progress tracking:
-
-```tsx
-// hooks/useTask.ts
-export function useTask() {
-  const [task, setTask] = useState<Task | null>(null);
-  const ws = useWebSocket();
-
-  const schedule = async (name: string, action: string, params: any) => {
-    const response = await fetch('/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, action, parameters: params }),
-    });
-    const newTask = await response.json();
-    setTask(newTask);
-    return newTask;
-  };
-
-  useEffect(() => {
-    if (!task) return;
-    
-    const handler = (msg: any) => {
-      if (msg.task_id === task.id) {
-        setTask(prev => ({ ...prev, status: msg.type.replace('task_', '') }));
-      }
-    };
-    ws.on('message', handler);
-    return () => ws.off('message', handler);
-  }, [task?.id]);
-
-  return { task, schedule, cancel: () => fetch(`/tasks/${task?.id}`, { method: 'DELETE' }) };
+  return <div>Stage: X={position[0]}, Y={position[1]}, Z={position[2]}</div>;
 }
 ```
 
 ---
 
-## API Endpoints
-
-### Actions
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/actions` | List all registered actions |
-| GET | `/actions?tag=imaging` | Filter actions by tag |
-| GET | `/actions/{name}` | Get action details & schema |
-| POST | `/actions/{name}/execute` | Execute action immediately |
-
-### State
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/state` | Get full state snapshot |
-| GET | `/state?key=stage.position` | Get specific key |
-| PUT | `/state` | Update single key |
-| PATCH | `/state` | Batch update multiple keys |
-| DELETE | `/state/{key}` | Delete a key |
-
-### Tasks
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/tasks` | Schedule a new task |
-| GET | `/tasks` | List all tasks |
-| GET | `/tasks?status=running` | Filter by status |
-| GET | `/tasks/{id}` | Get task details |
-| DELETE | `/tasks/{id}` | Cancel a task |
-
-### WebSocket
-| Endpoint | Description |
-|----------|-------------|
-| `ws://host/ws` | Real-time updates |
-
-**WebSocket Message Types:**
-- `state_update` - Buffered state changes
-- `task_scheduled`, `task_started`, `task_completed`, `task_failed`
-- `processing_start`, `processing_complete`
-
----
-
-## Running the Server
+## Running the API
 
 ```bash
-# Simple run script
-python refactor/run.py
-
-# Or with uvicorn directly
-uvicorn refactor.api.app:create_app --factory --reload
+cd refactor
+python run.py
+# or
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Adding Custom Actions
-
-Create a new file or add to `api/actions.py`:
-
-```python
-from refactor.api import register
-
-@register(
-    name="my_custom_action",
-    description="Does something custom",
-    tags=["custom"],
-)
-async def my_custom_action(params):
-    # Your implementation
-    return {"status": "done"}
-```
-
-The action is automatically available at `/actions/my_custom_action/execute`.
+Open http://localhost:8000/docs for the interactive API documentation.
 
 ---
 
-## Design Principles
+## Project Structure
 
-1. **Declarative Actions**: Actions are self-describing with schemas, enabling automatic UI generation
-2. **Reactive State**: UI subscribes to state; hardware updates push to UI automatically
-3. **Task-Based Async**: Long operations don't block; progress is streamed via WebSocket
-4. **Type Safety**: Pydantic models + TypeScript types = end-to-end type safety
-5. **Separation of Concerns**: Actions define *what*, Engine handles *when*, State tracks *current*
+```
+refactor/
+├── run.py                    # Simple startup script
+├── api/
+│   ├── __init__.py
+│   ├── main.py               # Entry point
+│   ├── app.py                # FastAPI app factory with lifespan
+│   ├── routes.py             # All HTTP/WebSocket endpoints
+│   ├── models.py             # Pydantic models
+│   ├── dependencies.py       # Typed FastAPI dependencies
+│   ├── managers.py           # ConnectionManager
+│   ├── state.py              # StateProxy for buffered state
+│   ├── microscope_actions.py # Registered microscope actions
+│   └── actors/
+│       ├── __init__.py       # Public exports
+│       ├── messages.py       # Actor message types
+│       ├── base.py           # Actor base class
+│       ├── functional.py     # FunctionalActor wrapper
+│       ├── agent.py          # Agent (manages actors)
+│       └── registry.py       # DefinitionRegistry, @register
+└── tests/
+    ├── conftest.py           # Test fixtures
+    ├── test_endpoints.py     # API endpoint tests
+    ├── test_registry.py      # Registry tests
+    ├── test_managers.py      # Manager tests
+    ├── test_models.py        # Model tests
+    ├── test_state.py         # State tests
+    └── test_websocket.py     # WebSocket tests
+```
+
+---
+
+## Running Tests
+
+```bash
+cd /path/to/ImSwitch
+python -m pytest refactor/tests/ -v
+```
+
+All 95 tests should pass.

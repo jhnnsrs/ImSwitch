@@ -66,6 +66,7 @@ dependencies = [
     "msgpack>=1.0.4",
     "esptool",
     "pytest>=8.4.2",
+    "rekuest-next>=0.24.3",
 ]
 
 [project.optional-dependencies]

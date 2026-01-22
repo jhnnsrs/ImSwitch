@@ -192,39 +192,45 @@ class FastAPIAgent:
             state.status = "done"
             event_data["status"] = "done"
             # Also send application-level event
-            await self.connection_manager.broadcast({
-                "type": "assignation_done",
-                "assignation_id": assignation_id,
-                "action": state.interface,
-                "returns": state.returns,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
+            await self.connection_manager.broadcast(
+                {
+                    "type": "assignation_done",
+                    "assignation_id": assignation_id,
+                    "action": state.interface,
+                    "returns": state.returns,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
 
         elif isinstance(message, messages.ErrorEvent):
             state.status = "error"
             state.error = message.error
             event_data["error"] = message.error
             # Also send application-level event
-            await self.connection_manager.broadcast({
-                "type": "assignation_error",
-                "assignation_id": assignation_id,
-                "action": state.interface,
-                "error": message.error,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
+            await self.connection_manager.broadcast(
+                {
+                    "type": "assignation_error",
+                    "assignation_id": assignation_id,
+                    "action": state.interface,
+                    "error": message.error,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
 
         elif isinstance(message, messages.CriticalEvent):
             state.status = "critical"
             state.error = message.error
             event_data["error"] = message.error
             # Also send application-level event
-            await self.connection_manager.broadcast({
-                "type": "assignation_error",
-                "assignation_id": assignation_id,
-                "action": state.interface,
-                "error": message.error,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
+            await self.connection_manager.broadcast(
+                {
+                    "type": "assignation_error",
+                    "assignation_id": assignation_id,
+                    "action": state.interface,
+                    "error": message.error,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
 
         elif isinstance(message, messages.LogEvent):
             event_data["message"] = message.message
@@ -303,13 +309,15 @@ class FastAPIAgent:
             self.assignation_states[assignation_id] = state
 
         # Broadcast assignation_created event
-        await self.connection_manager.broadcast({
-            "type": "assignation_created",
-            "assignation_id": assignation_id,
-            "action": interface,
-            "args": args,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self.connection_manager.broadcast(
+            {
+                "type": "assignation_created",
+                "assignation_id": assignation_id,
+                "action": interface,
+                "args": args,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
         # Create rekuest_next Assign message
         # Note: extension defaults to "default" for our use case
@@ -351,7 +359,7 @@ class FastAPIAgent:
 
             if not actor:
                 return False
-            
+
             state = self.assignation_states.get(assignation_id)
             if state and state.status in ["done", "error", "critical"]:
                 # Already completed, cannot cancel
@@ -361,7 +369,10 @@ class FastAPIAgent:
         # For FastAPI use case, most actions complete quickly anyway.
         # We'll just cancel the asyncio task if it's running.
         try:
-            if hasattr(actor, '_running_asyncio_tasks') and assignation_id in actor._running_asyncio_tasks:
+            if (
+                hasattr(actor, "_running_asyncio_tasks")
+                and assignation_id in actor._running_asyncio_tasks
+            ):
                 task = actor._running_asyncio_tasks[assignation_id]
                 task.cancel()
                 return True
@@ -396,10 +407,10 @@ class FastAPIAgent:
 
         # Create actor with self as the agent
         actor = actor_builder(agent=self)
-        
+
         # Start the actor's listening loop (creates _in_queue and starts alisten())
         await actor.arun()
-        
+
         self.managed_actors[actor_id] = actor
 
         logger.info(f"Created and started actor for interface: {interface}")

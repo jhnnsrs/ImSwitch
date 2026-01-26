@@ -67,6 +67,9 @@ dependencies = [
     "esptool",
     "pytest>=8.4.2",
     "rekuest-next>=0.24.3",
+    "fakts-next>=3.0.0",
+    "arkitekt-next>=0.35.0",
+    "arkitekt-server",
 ]
 
 [project.optional-dependencies]

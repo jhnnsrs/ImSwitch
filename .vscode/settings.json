@@ -5,5 +5,4 @@
             "args": ["-arch", "x86_64", "/bin/bash"]
         }
     },
-    "terminal.integrated.defaultProfile.osx": "x86 bash"
 }

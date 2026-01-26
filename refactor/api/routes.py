@@ -301,7 +301,7 @@ async def list_actions(
         List of action definitions
     """
     result = []
-    for interface, template in registry.templates.items():
+    for interface, template in registry.implementations.items():
         defn = template.definition
 
         # Filter by collection if specified

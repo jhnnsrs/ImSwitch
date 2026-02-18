@@ -52,6 +52,8 @@ class ExperimentNormalMode(ExperimentModeBase):
         self._logger.debug("Normal mode is enabled. Creating workflow steps for precise control.")
 
         # Extract parameters
+        # TODO: DONT BE LAZY:D send the base model over, if you have "calculated proeprties" you can use
+        # computed fields
         z_positions = kwargs.get('z_positions', [0])
         exposures = kwargs.get('exposures', [100])
         gains = kwargs.get('gains', [1])
@@ -315,6 +317,8 @@ class ExperimentNormalMode(ExperimentModeBase):
 
         return file_writers
 
+    # TODO: Here you are passing every variable again even though you store the initial setup
+    # already on self. Decide which pattern you want to use.
     def _create_tile_workflow_steps(self,
                                   tiles: List[Dict],
                                   position_center_index: int,
@@ -367,6 +371,7 @@ class ExperimentNormalMode(ExperimentModeBase):
         """
         # Get scan range information
         min_x, max_x, min_y, max_y, _, _ = self.compute_scan_ranges([tiles])
+        # Again mix matching funcitonal with OOP
         m_pixel_size = self.controller.detectorPixelSize[-1] if hasattr(self.controller, 'detectorPixelSize') else 1.0
 
         # Turn on illumination once at the beginning if only one source
@@ -433,7 +438,7 @@ class ExperimentNormalMode(ExperimentModeBase):
                         step_id=step_id,
                         main_func=self.controller.move_stage_z,
                         main_params={"posZ": i_z, "relative": False},
-                        pre_funcs=[self.controller.wait_time],
+                        pre_funcs=[self.controller.wait_time], # Wait time?
                         pre_params={"seconds": t_pre_s},
                     ))
                     step_id += 1

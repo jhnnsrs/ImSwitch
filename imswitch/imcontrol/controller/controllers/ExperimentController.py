@@ -127,6 +127,7 @@ class ParameterValue(BaseModel):
     performanceTriggerMode: str = Field("hardware", description="Trigger mode: 'hardware' (external TTL) or 'software' (callback-based)")
     performanceTPreMs: float = Field(90.0, description="Pre-exposure settle time in milliseconds")
     performanceTPostMs: float = Field(50.0, description="Post-exposure/acquisition time in milliseconds")
+    #TODO: Should be an enum "Write Mode"
     ome_write_tiff: bool = Field(False, description="Whether to write OME-TIFF files")
     ome_write_zarr: bool = Field(True, description="Whether to write OME-Zarr files")
     ome_write_stitched_tiff: bool = Field(False, description="Whether to write stitched OME-TIFF files")
@@ -164,6 +165,8 @@ class Experiment(BaseModel):
         return config
 
 
+# TODO: Get rid of all these models, as they are not being used?
+
 # MDA-related models for useq-schema integration
 class MDAChannelConfig(BaseModel):
     """Configuration for an MDA channel."""
@@ -190,6 +193,7 @@ class MDASequenceInfo(BaseModel):
     axis_order: tuple
     estimated_duration_minutes: float
 
+# Keep That one ;)
 class ExperimentWorkflowParams(BaseModel):
     """Parameters for the experiment workflow."""
 
@@ -315,6 +319,7 @@ class ExperimentController(ImConWidgetController):
         self.normal_mode = ExperimentNormalMode(self)
 
         # Initialize omero  parameters  # TODO: Maybe not needed!
+        # TODO: Maybe get rid of that as of now? Less potential to cause weird errors?
         self.omero_url = self._master.experimentManager.omeroServerUrl
         self.omero_username = self._master.experimentManager.omeroUsername
         self.omero_password = self._master.experimentManager.omeroPassword
@@ -407,7 +412,7 @@ class ExperimentController(ImConWidgetController):
         except Exception as e:
             self._logger.error(f"Failed to generate custom wellplate layout: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-
+    # TODO: Remove entirely (If at all in anothe controller i.e IO controller)
     @APIExport(requestType="GET")
     def getOMEROConfig(self):
         """Get current OMERO configuration from the experiment manager."""
@@ -688,12 +693,14 @@ class ExperimentController(ImConWidgetController):
         autofocusMax = p.autoFocusMax
         autofocusMin = p.autoFocusMin
         autofocusStepSize = p.autoFocusStepSize
+        # why the getattr here? these should be set by basedmodels (default)
         autofocusIlluminationChannel = getattr(p, 'autoFocusIlluminationChannel', "") or ""
         autofocusMode = getattr(p, 'autoFocusMode', 'software')  # Default to software if not specified
         autofocus_target_focus_setpoint = getattr(p, 'autofocus_target_focus_setpoint', None)
         autofocus_max_attempts = getattr(p, 'autofocus_max_attempts', 2)
 
         # pre-check gains/exposures  if they are lists and have same lengths as illuminationsources
+        # again this should really be handled in the validation logic of the basemodel, thats what they are for ;)
         if type(gains) is not List and type(gains) is not list: gains = [gains]
         if type(exposures) is not List and type(exposures) is not list: exposures = [exposures]
         if len(gains) != len(illuSources): gains = [-1]*len(illuSources)
@@ -779,6 +786,8 @@ class ExperimentController(ImConWidgetController):
                     'nTimes': nTimes
                 }
 
+                # TODO: Generally this is better abstracted and based as the whole experiment
+                # just as the one in performance mode (i.e same interface)
                 result = self.normal_mode.execute_experiment(
                     snake_tiles=snake_tiles,
                     illumination_intensities=illuminationIntensities,
@@ -814,12 +823,15 @@ class ExperimentController(ImConWidgetController):
             workflowSteps = all_workflow_steps
             file_writers = all_file_writers
             # Create workflow progress handler
+            # anonymous funktions are okay, but generally you could just have this
+            # as a method on the class
             def sendProgress(payload):
                 self.sigExperimentWorkflowUpdate.emit(payload)
 
             # Create workflow and context
             from imswitch.imcontrol.model.managers.WorkflowManager import Workflow, WorkflowContext
-            wf = Workflow(workflowSteps, self.workflow_manager)
+            wf = Workflow(workflowSteps, self.workflow_manager) # bad pattern, you both have it as a dependency and
+            # then use it later as a param with the workflow manager, 
             context = WorkflowContext()
 
             # Set metadata
@@ -834,7 +846,7 @@ class ExperimentController(ImConWidgetController):
             # Store file_writers in context
             if len(file_writers) > 0:
                 context.set_object("file_writers", file_writers)
-            context.on("progress", sendProgress)
+            context.on("progress", sendProgress) # generally nice functional pattern but hard to decypher whats the purpose of the context? 
             context.on("rgb_stack", sendProgress)
 
             # Start the workflow
@@ -856,7 +868,7 @@ class ExperimentController(ImConWidgetController):
         self._logger.debug(f"Acquiring frame on channel {channel}")
 
         # ensure we get a fresh frame (frameSync=3 to account for exposure/gain register latency)
-        timeoutFrameRequest = 1 # seconds # TODO: Make dependent on exposure time
+        timeoutFrameRequest = 1 # seconds # TODO: Make dependent on exposure time #TODO YES!!!! I generally dont understand this loop at all yet
         cTime = time.time()
 
         lastFrameNumber=-1
@@ -1079,7 +1091,7 @@ class ExperimentController(ImConWidgetController):
 
         if wait_time > 0:
             self._logger.info(f"Waiting {wait_time:.2f}s for next timepoint (timepoint {timepoint})")
-            time.sleep(wait_time)
+            time.sleep(wait_time) # TODO: Really dangerous, for cancellation , if you wait for another 3 hours how do you stop it? this thread will just keep on sleeiping
         else:
             self._logger.warning(f"Timepoint {timepoint} is running {abs(wait_time):.2f}s behind schedule")
             # Small delay to prevent issues
@@ -1152,6 +1164,7 @@ class ExperimentController(ImConWidgetController):
         try:
             # Get file_writers list from context
             file_writers = context.get_object("file_writers")
+            #TODO: Why are file writer in the context? this looks like a catchall class to pass stuff down, abstract at least io out
             if file_writers is None or position_center_index >= len(file_writers):
                 self._logger.error(f"No OME writer found for tile index {position_center_index}")
                 metadata["frame_saved"] = False
@@ -1231,15 +1244,18 @@ class ExperimentController(ImConWidgetController):
         channel_str = kwargs.get("channel", "Mono")
 
         # 3) Write the frame with stage coords:
-        if 0:
+        if 0: #TODO: ....
             omeZarrStore.write(img, x=posX, y=posY, z=posZ)
         else:
             # TODO: This is not working as the posY and posX are in microns, but the OME-Zarr store expects pixel coordinates.
             # Convert to pixel coordinates
             omeZarrStore.write_tile(img, t=0, c=0, z=0, y_start=posY, x_start=posX)
 
-        time.sleep(0.01)
+        time.sleep(0.01) #TODO: Why? Is there a race condition somehwer?
 
+
+    # TODO: This is what i mean with you like functions, you keep on reimplementating them :D by default your manager should
+    # be good enough
 
     def set_laser_power(self, power: float, channel: str):
         if channel not in self.allIlluNames:
@@ -1257,13 +1273,17 @@ class ExperimentController(ImConWidgetController):
         # {"task":"/motor_act",     "motor":     {         "steppers": [             { "stepperid": 1, "position": -1000, "speed": 30000, "isabs": 0, "isaccel":1, "isen":0, "accel":500000}     ]}}
         self._logger.info(f"Moving stage to X={posX}, Y={posY}")
         #if posY and posX is None:
+
+        # TODO: This is an example of a badly explicit calling, instead of showing me that you call this with the default speed (instead of allowing me to set a different one), you hide this away and yuse class atributed, either name the funciton like that or "move_state_xy_with_default_speed" but not like that ;)
         self.mStage.move(value=(posX, posY), speed=(self.SPEED_X_default, self.SPEED_Y_default), axis="XY", is_absolute=not relative, is_blocking=True, acceleration=self.ACCELERATION)
         #newPosition = self.mStage.getPosition()
+        #
         #self._commChannel.sigUpdateMotorPosition.emit([posX, posY])
         return (posX, posY) # TODO: Need to adjust in case of relative move
 
     def move_stage_z(self, posZ: float, relative: bool = False, maxSpeedZ=5000):
         self._logger.info(f"Moving stage to Z={posZ}")
+        # TODO: Same here
         self.mStage.move(value=posZ, speed=np.min((self.SPEED_Z, maxSpeedZ)), axis="Z", is_absolute=not relative, is_blocking=True)
         #newPosition = self.mStage.getPosition()
         #self._commChannel.sigUpdateMotorPosition.emit([newPosition["Z"]])
@@ -1291,7 +1311,7 @@ class ExperimentController(ImConWidgetController):
         # Check if performance mode is running
         performance_status = self.performance_mode.get_scan_status()
         if performance_status["running"]:
-            return {"status": "error", "message": "Cannot pause experiment in performance mode"}
+            return {"status": "error", "message": "Cannot pause experiment in performance mode"} #TODO: Hopefully we can soon ;)
 
         if workflow_status == "running":
             return self.workflow_manager.pause_workflow()
@@ -1398,6 +1418,7 @@ class ExperimentController(ImConWidgetController):
     # -------------------------------------------------------------------------
     # public API
     # -------------------------------------------------------------------------
+    # TODO: Is this still needed? Or is it an old implementation? if so DELETE
     @APIExport(runOnUIThread=False)
     def startFastStageScanAcquisition(self,
                       xstart:float=0, xstep:float=500, nx:int=10,
@@ -1626,7 +1647,7 @@ class ExperimentController(ImConWidgetController):
                 frames, ids = self.mDetector.getChunk()  # empties camera buffer
 
                 if frames.size == 0:
-                    time.sleep(0.005)
+                    time.sleep(0.005) # TODO: so the buffer is empty?, what happens if you just get half of the buffer? Does that happen?
                     continue
 
                 for frame, fid in zip(frames, ids):
@@ -1772,6 +1793,8 @@ class ExperimentController(ImConWidgetController):
             "stage_available": self.mStage is not None
         }
 
+
+    # TODO: Necessary as of now? there are too many implementations for the same logic, hard to decipher whats where?
     @APIExport(requestType="POST")
     def start_mda_experiment(self, request: MDASequenceRequest) -> Dict[str, Any]:
         """
